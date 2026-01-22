@@ -280,6 +280,7 @@ class RTSGame():
                         
                     # troop move and attack
                     
+                    
 
 
 new = RTSGame()
