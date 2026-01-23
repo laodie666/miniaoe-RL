@@ -48,8 +48,6 @@ BARRACK_TYPE = 2
 TROOP_TYPE = 3
 GOLD_TYPE = 4
 
-# carry gold 1 bit
-
 # character representation for each unit type
 ASCII_CHARS = {
     TC_TYPE: 'T',       
@@ -67,6 +65,8 @@ PLAYER_COLORS = {
     NO_PLAYER: (200, 200, 200) # grey
 }
 
+
+
 # NOTE: The model will return an action map of action to take for each actor on every tile.
 ACT_STAY  = 0  
 ACT_UP    = 1
@@ -75,6 +75,68 @@ ACT_LEFT  = 3
 ACT_RIGHT = 4
 TURN_TC = 5 # Turn villager to TC
 TURN_BARRACK = 6
+
+NUM_ACTIONS = 7
+
+# +1 are hp and carry gold
+CHANNEL_NUM = MAX_ACTORS + MAX_PLAYERS + 1 + 1
+
+class Player():
+    
+    def __init__(self, side):
+        self.side = side
+    
+    def getAction(self):
+        pass
+
+# Need some adjustment to the game features.
+class PolicyNetwork(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(CHANNEL_NUM, 8, 3)
+        self.conv2 = nn.Conv2d(8, 16, 3)
+        
+        self.fc1 = nn.Linear((WINDOW_W - 4) * (WINDOW_H - 4) * 16, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, WINDOW_W * WINDOW_W * NUM_ACTIONS)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = torch.flatten(x, 1) 
+        
+        x = F.relu(self.fc1(x))
+        x = F.dropout(x, 0.2)
+        
+        x = F.relu(self.fc2(x))
+        x = F.dropout(x, 0.2)
+        
+        x = self.fc3(x)
+        
+        batch_size = x.size(0)
+        x = x.view(batch_size, MAP_W, MAP_H, NUM_ACTIONS)
+        
+        return x
+        
+        return x
+
+class NNPlayer(Player):
+        
+    def __init__(self, side, policy:PolicyNetwork):
+        self.side = side
+        self.policy = policy
+        
+    def getAction(self, game: "RTSGame"):
+        state_tensor = torch.from_numpy(game.get_state()).unsqueeze(0)
+        probs = self.policy(state_tensor)
+        self.m = torch.distributions.Categorical(probs)
+        action = self.m.sample()
+        
+        return action
+    
+    def getProbabilities(self, action):
+        return self.m.log_prob(action)    
+
 
 class tile:
 
@@ -150,8 +212,6 @@ class RTSGame():
     
     # TODO
     # Set up game env
-    #   Set up map
-    #   Set up different units
     #   Unit interaction
     #   Set up available moves (Will need optimization)
     #   Playable
@@ -227,6 +287,10 @@ class RTSGame():
         map[cur_pos] = bitpackTile(tile(NO_PLAYER, EMPTY_TYPE, 0, 0))
         return map
 
+    # Return the features of every tile
+    def get_state(self):
+        return np.array([bitunpackTile(self.map[x, y]).onehotEncode() for x in range(MAP_W) for y in range(MAP_H)]).reshape(MAP_W, MAP_H, -1)
+
     def step(self, action, side):
         empty_val = bitpackTile(tile(NO_PLAYER, EMPTY_TYPE, 0, 0))
 
@@ -259,7 +323,7 @@ class RTSGame():
                             tile_info.carry_gold -= VILLAGER_COST
                             self.map[x, y] = bitpackTile(tile_info)
 
-                    # Barrack make troop
+                    # TODO Barrack make troop
                     
                     # Villager collect, return gold, make tc and barrack
                     elif tile_info.actor_type == VILLAGER_TYPE:
@@ -278,14 +342,30 @@ class RTSGame():
                             self.map[x, y] = bitpackTile(tile_info)
                             self.map[tx, ty] = bitpackTile(target_tile_info)
                         
-                    # troop move and attack
+                    # TODO troop move and attack
                     
-                    
+        reward = self.get_score()
+        win = -1
+        
+        return action, self.get_state(), win, reward
+        # Game end check, return action, state, win, reward
 
+    def get_score(self, side):
+        score = -12
+        for x in range(MAP_W):
+            for y in range(MAP_H):
+                tile_info = bitunpackTile(self.map[x][y])
+                if tile_info.player_n == side:
+                    if tile_info.actor_type == TC_TYPE:
+                        score += tile_info.hp
+                        score += tile_info.carry_gold
+                    elif tile_info.actor_type == VILLAGER_TYPE:
+                        score += 1
 
 new = RTSGame()
 pygame.init()
 SCREEN = pygame.display.set_mode((WINDOW_W, WINDOW_H))
 
-new.setScreen(SCREEN)
+print(new.get_state().shape)
+
 new.display()
