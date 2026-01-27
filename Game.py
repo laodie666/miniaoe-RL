@@ -98,9 +98,9 @@ class PolicyNetwork(nn.Module):
         self.conv1 = nn.Conv2d(CHANNEL_NUM, 8, 3)
         self.conv2 = nn.Conv2d(8, 16, 3)
         
-        self.fc1 = nn.Linear((WINDOW_W - 4) * (WINDOW_H - 4) * 16, 120)
+        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16, 120)
         self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, WINDOW_W * WINDOW_W * NUM_ACTIONS)
+        self.fc3 = nn.Linear(84, MAP_W * MAP_H * NUM_ACTIONS)
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
@@ -115,24 +115,52 @@ class PolicyNetwork(nn.Module):
         
         x = self.fc3(x)
         
-        batch_size = x.size(0)
-        x = x.view(batch_size, MAP_W, MAP_H, NUM_ACTIONS)
+        x = x.view(MAP_W, MAP_H, NUM_ACTIONS)
+        
+        return x
+class CriticNetwork(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(CHANNEL_NUM, 8, 3)
+        self.conv2 = nn.Conv2d(8, 16, 3)
+        
+        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, 1)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = torch.flatten(x, 1) 
+        
+        x = F.relu(self.fc1(x))
+        x = F.dropout(x, 0.2)
+        
+        x = F.relu(self.fc2(x))
+        x = F.dropout(x, 0.2)
+        
+        x = self.fc3(x)
         
         return x
 
 class NNPlayer(Player):
         
-    def __init__(self, side, policy:PolicyNetwork):
+    def __init__(self, side, policy:PolicyNetwork, critic:PolicyNetwork):
         self.side = side
         self.policy = policy
+        self.critic = critic
         
     def getAction(self, game: "RTSGame"):
-        state_tensor = torch.from_numpy(game.get_state()).unsqueeze(0)
-        probs = self.policy(state_tensor)
-        self.m = torch.distributions.Categorical(probs)
+        state_tensor = torch.from_numpy(game.get_state()).float().unsqueeze(0)
+
+        logits = self.policy(state_tensor)
+        self.m = torch.distributions.Categorical(logits=logits)
+
         action = self.m.sample()
-        
+        self.last_action = action
+
         return action
+
     
     def getProbabilities(self, action):
         return self.m.log_prob(action) 
@@ -387,8 +415,64 @@ class RTSGame():
                     elif tile_info.actor_type == VILLAGER_TYPE:
                         score += 1
                         
-def train(p1: Player, p2: Player):
+def train(trainee: NNPlayer, opponent: Player, episodes):
     # ACTOR CRITIC?
+    # Initialize optimizer
+    
+    policy_optimizer = optim.Adam(trainee.policy.parameters())
+    critic_optimizer = optim.Adam(trainee.critic.parameters())
+    
+    pygame.init()
+    
+    side = 0
+    # Episodes
+    for episode in range(episodes):
+        print(episode)
+        step = 0
+        done = False
+        game = RTSGame()
+        
+        rewards = []
+        log_probs = []
+        state_values = []
+        
+        policy_optimizer.zero_grad()
+        critic_optimizer.zero_grad()
+        
+        while not done:
+            if side == 0:
+                state = game.get_state()
+                state_values.append(trainee.critic(state))
+                action = trainee.getAction(game)
+                
+                log_prob = trainee.getProbabilities(action)
+                log_probs.append(log_prob)
+                
+                action, state, win, reward = game.step(action, side)
+                
+                rewards.append(reward)
+                
+            else:
+                action, state, win, reward = game.step(opponent.getAction(game), side)
+            
+            side = (side + 1) % 2
+        
+        # Reward
+        rewards = torch.tensor(rewards)
+        rewards = (rewards - rewards.mean()) / (rewards.std())
+        # Lossfunctions
+        state_values = torch.tensor(state_values)
+        advantage = torch.sub(rewards, state_values)
+        log_probs = torch.tensor(log_probs)
+        policy_loss = -log_probs * advantage
+            
+        critic_loss = F.huber_loss(state_values, rewards)
+        policy_loss.backward()
+        critic_loss.backward()
+        # Optimze
+        policy_optimizer.step()
+        critic_optimizer.step()
+    
     return None
 
 
