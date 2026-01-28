@@ -233,7 +233,7 @@ def newBarrackTile(side):
     return tile(side, BARRACK_TYPE, BARRACK_HP, 2)
 
 def newTCTile(side):
-    return tile(side, TC_TYPE, TC_COST, 1)
+    return tile(side, TC_TYPE, TC_HP, 1)
 
 class RTSGame():
 
@@ -256,7 +256,6 @@ class RTSGame():
 
         self.map[0, 4] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
         self.map[9, 4] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
-
 
         if not pygame.font.get_init():
             pygame.font.init()
@@ -310,6 +309,10 @@ class RTSGame():
         # Move number channels to the front.
         state_tensor = state_tensor.permute(0, 3, 1, 2) 
         return state_tensor
+
+    def flip_map(self):
+        self.map = np.flip(self.map, axis = 0)
+        return None
 
     def step(self, action, side):
         empty_val = bitpackTile(tile(NO_PLAYER, EMPTY_TYPE, 0, 0))
@@ -435,37 +438,8 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma):
         
         last_reward = 0
 
-        slow = False
-        skip = False
+
         while not done and step <= 50:
-            if  episode > 1000 and (episode % 200 == 0):
-                screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
-                game.setScreen(screen)
-                game.display()
-                if skip:
-                    clock.tick(0)
-                elif not slow:
-                    clock.tick(15)
-                else:
-                    clock.tick(2)
-                
-                if pygame.mouse.get_pressed()[0]:
-                    if 0 <= pygame.mouse.get_pos()[0] <= WINDOW_W and 0 <= pygame.mouse.get_pos()[1] <= WINDOW_H:
-                        grid_x = pygame.mouse.get_pos()[0] // BLOCKSIZE
-                        grid_y = pygame.mouse.get_pos()[1] // BLOCKSIZE
-                        tile_info = bitunpackTile(game.map[grid_x, grid_y])
-                        
-                        print(f"mouse click at grid {(grid_x, grid_y)}")
-                        print(f"tile info: hp:{tile_info.hp}, gold:{tile_info.carry_gold}")
-                events = pygame.event.get()
-                for event in events:
-                    if event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_SPACE and not slow:
-                            slow = True
-                        elif event.key == pygame.K_SPACE and slow:
-                            slow = False
-                        elif event.key == pygame.K_s:
-                            skip = True
 
             if side == 0: 
                 state_tensor = game.get_state_tensor()
@@ -481,7 +455,9 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma):
                 last_reward = reward
                 
             else:
+                game.flip_map()
                 action, state_tensor, win, reward = game.step(opponent.getAction(game), side)
+                game.flip_map()
             
             side = (side + 1) % 2
             step += 1 
@@ -515,11 +491,105 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma):
         critic_optimizer.step()
 
         print(f"Ep {episode}: Returns {sum(returns)}: Reward_sum {sum(rewards)}")
+        if win != -1:
+            done = True
     
     return None
+
+def pit(p1: Player, p2: Player, num_games):
+    pygame.init()
+    clock = pygame.time.Clock()
+    
+    side = 0
+    win_rate = [0,0]
+    # Episodes
+    for game_num in range(num_games):
+        step = 0
+        done = False
+        game = RTSGame()
+
+        slow = False
+        skip = False
+        while not done and step <= 50:
+            
+            if  game_num == 0:
+                screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
+                game.setScreen(screen)
+                game.display()
+                if skip:
+                    clock.tick(0)
+                elif not slow:
+                    clock.tick(15)
+                else:
+                    clock.tick(2)
+                
+                if pygame.mouse.get_pressed()[0]:
+                    if 0 <= pygame.mouse.get_pos()[0] <= WINDOW_W and 0 <= pygame.mouse.get_pos()[1] <= WINDOW_H:
+                        grid_x = pygame.mouse.get_pos()[0] // BLOCKSIZE
+                        grid_y = pygame.mouse.get_pos()[1] // BLOCKSIZE
+                        tile_info = bitunpackTile(game.map[grid_x, grid_y])
+                        
+                        print(f"mouse click at grid {(grid_x, grid_y)}")
+                        print(f"tile info: hp:{tile_info.hp}, gold:{tile_info.carry_gold}")
+                events = pygame.event.get()
+                for event in events:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_SPACE and not slow:
+                            slow = True
+                        elif event.key == pygame.K_SPACE and slow:
+                            slow = False
+                        elif event.key == pygame.K_s:
+                            skip = True
+
+            if side == 0: 
+                action = p1.getAction(game)
+                
+                action, state_tensor, win, reward = game.step(action, side)
+            else:
+                game.flip_map()
+                action, state_tensor, win, reward = game.step(p2.getAction(game), side)
+                game.flip_map()
+            
+            side = (side + 1) % 2
+            step += 1 
+
+            if win != -1:
+                done = True
+        if done:
+            win_rate[win] += 1
+        else:
+            if game.get_score(0) > game.get_score(1):
+                win_rate[0] += 1
+            elif game.get_score(0) < game.get_score(1):
+                win_rate[1] += 1
+    return win_rate
+
+def copy_player(policy_nn, critic_nn, policy_player):
+    policy_nn_copy = PolicyNetwork()
+    policy_nn_copy.load_state_dict(policy_nn.state_dict())
+
+    critic_nn_copy = CriticNetwork()
+    critic_nn_copy.load_state_dict(critic_nn.state_dict())
+
+    policy_player_copy = NNPlayer(0, policy_nn_copy, critic_nn_copy)
+
+    return policy_nn_copy, critic_nn_copy, policy_player_copy
 
 policy_nn = PolicyNetwork()
 critic_nn = CriticNetwork()
 policy_player = NNPlayer(0, policy_nn, critic_nn)
-random_player = RandomPlayer(1)
-train(policy_player, random_player, 5000, 0.95)
+
+
+policy_nn_copy, critic_nn_copy, policy_player_copy = copy_player(policy_nn, critic_nn, policy_player)
+
+win_rate = pit(policy_player, policy_player_copy, 50)
+print(win_rate)
+
+epochs = 20
+for epoch in range(epochs):
+    print(f"epoch {epoch}")
+    train(policy_player, policy_player_copy, 500, 0.95)
+    win_rate = pit(policy_player, policy_player_copy, 50)
+    print(win_rate)
+    if win_rate[0] - 5 >= win_rate[1]:
+        policy_nn_copy, critic_nn_copy, policy_player_copy = copy_player(policy_nn, critic_nn, policy_player)
