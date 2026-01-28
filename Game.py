@@ -97,14 +97,17 @@ class PolicyNetwork(nn.Module):
         self.conv1 = nn.Conv2d(CHANNEL_NUM, 8, 3)
         self.conv2 = nn.Conv2d(8, 16, 3)
         
-        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16, 120)
+        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16 + 1, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, MAP_W * MAP_H * NUM_ACTIONS)
 
-    def forward(self, x):
+    def forward(self, x, side):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = torch.flatten(x, 1) 
+        
+        side_tensor = torch.full((x.shape[0], 1), side)
+        x = torch.cat((x, side_tensor), dim=1)
         
         x = F.relu(self.fc1(x))
         x = F.dropout(x, 0.2)
@@ -123,14 +126,17 @@ class CriticNetwork(nn.Module):
         self.conv1 = nn.Conv2d(CHANNEL_NUM, 8, 3)
         self.conv2 = nn.Conv2d(8, 16, 3)
         
-        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16, 120)
+        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16 + 1, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 1)
 
-    def forward(self, x):
+    def forward(self, x, side):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = torch.flatten(x, 1) 
+        
+        side_tensor = torch.full((x.shape[0], 1), side)
+        x = torch.cat((x, side_tensor), dim=1)
         
         x = F.relu(self.fc1(x))
         x = F.dropout(x, 0.2)
@@ -151,7 +157,7 @@ class NNPlayer(Player):
         
     def getAction(self, game: "RTSGame"):
         
-        logits = self.policy(game.get_state_tensor())
+        logits = self.policy(game.get_state_tensor(), self.side)
         self.m = torch.distributions.Categorical(logits=logits)
 
         action = self.m.sample()
@@ -469,7 +475,7 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma, entropy_coef):
                 mask = player_map > 0
                 masks.append(mask)
 
-                state_values.append(trainee.critic(state_tensor))
+                state_values.append(trainee.critic(state_tensor, side))
                 action = trainee.getAction(game)
                 
                 log_prob = trainee.getProbabilities(action)
