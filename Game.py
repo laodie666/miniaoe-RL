@@ -32,7 +32,7 @@ BARRACK_HP = 5
 
 VILLAGER_COST = 1
 TROOP_COST = 2
-TC_COST = 5
+TC_COST = 4
 BARRACK_COST = 3
     
 MAX_PLAYERS = 4
@@ -403,11 +403,15 @@ class RTSGame():
             for y in range(MAP_H):
                 tile_info = bitunpackTile(self.map[x][y])
                 if tile_info.player_n == side:
+                    if tile_info.actor_type == TC_TYPE:
+                        score += tile_info.hp
+                        score += tile_info.carry_gold * 1.5
+                    else:
                         score += tile_info.hp
                         score += tile_info.carry_gold
         return score
                         
-def train(trainee: NNPlayer, opponent: Player, episodes, gamma, entropy):
+def train(trainee: NNPlayer, opponent: Player, episodes, gamma, entropy_coef):
     # ACTOR CRITIC?
     # Initialize optimizer
     
@@ -488,8 +492,8 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma, entropy):
         advantage = advantage.view(-1, 1, 1).expand_as(log_probs)
         policy_loss = -(log_probs * advantage) * masks.float()
         policy_loss = policy_loss.sum() / (masks.sum() + 1e-7)
-            
-        policy_loss = policy_loss - entropy * entropy
+
+        policy_loss = policy_loss - entropy * entropy_coef
 
         critic_loss = F.huber_loss(state_values, returns)
         policy_loss.backward()
