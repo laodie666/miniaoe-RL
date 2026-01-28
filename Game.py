@@ -24,16 +24,16 @@ WINDOW_W = MAP_W * BLOCKSIZE
 NO_PLAYER = 2    
 
 # Initial hp 4 bits
-TC_HP = 10
-VILLAGER_HP = 2
-TROOP_HP = 3
+TC_HP = 4
+VILLAGER_HP = 1
+TROOP_HP = 2
 GOLD_HP = -1
-BARRACK_HP = 5
+BARRACK_HP = 3
 
 VILLAGER_COST = 1
-TROOP_COST = 2
-TC_COST = 4
-BARRACK_COST = 3
+TROOP_COST = 1
+TC_COST = 3
+BARRACK_COST = 2
     
 MAX_PLAYERS = 4
 MAX_ACTORS = 8
@@ -256,6 +256,12 @@ class RTSGame():
 
         self.map[0, 4] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
         self.map[9, 4] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
+        
+        self.map[0, 1] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
+        self.map[9, 1] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
+        
+        self.map[0, 7] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
+        self.map[9, 7] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
 
         self.update_unpacked_map()
         self.update_onehot_encoding()
@@ -361,7 +367,7 @@ class RTSGame():
                             processed[tx][ty] = 1
 
                     # Barrack makes troop
-                    if tile_info.actor_type == BARRACK_TYPE:
+                    elif tile_info.actor_type == BARRACK_TYPE:
                         if target_tile_info.actor_type == EMPTY_TYPE and tile_info.carry_gold >= TROOP_COST:
                             self.map[tx, ty] = bitpackTile(tile(side, TROOP_TYPE, TROOP_HP, 0))
                             tile_info.carry_gold -= TROOP_COST
@@ -375,10 +381,10 @@ class RTSGame():
                         elif action[x][y] == TURN_TC and tile_info.carry_gold >= TC_COST:
                             self.map[x][y] = bitpackTile(newTCTile(side))
                         elif target_tile_info.actor_type == GOLD_TYPE:
-                            if tile_info.carry_gold <= 10:
+                            if tile_info.carry_gold <= 5:
                                 tile_info.carry_gold += 1
                             self.map[x, y] = bitpackTile(tile_info)
-                        elif target_tile_info.player_n == NO_PLAYER:
+                        elif target_tile_info.actor_type == EMPTY_TYPE:
                             self.move_unit((x, y), (tx, ty))
                             processed[tx][ty] = 1
                         elif target_tile_info.player_n == side and target_tile_info.actor_type == TC_TYPE or target_tile_info.actor_type == BARRACK_TYPE:
@@ -390,7 +396,7 @@ class RTSGame():
                             self.map[tx, ty] = bitpackTile(target_tile_info)
                         
                     elif tile_info.actor_type == TROOP_TYPE:
-                        if target_tile_info.player_n == NO_PLAYER:
+                        if target_tile_info.actor_type == EMPTY_TYPE:
                             self.move_unit((x, y), (tx, ty))
                             processed[tx][ty] = 1
                         elif target_tile_info.player_n != side and target_tile_info.player_n != NO_PLAYER:
@@ -603,15 +609,15 @@ def copy_player(policy_nn, critic_nn, policy_player):
 
 policy_nn = PolicyNetwork()
 
-print("loaded policy checkpoint")
-policy_state_dict = torch.load("policy_checkpoint.pt")
-policy_nn.load_state_dict(policy_state_dict)
+# print("loaded policy checkpoint")
+# policy_state_dict = torch.load("policy_checkpoint.pt")
+# policy_nn.load_state_dict(policy_state_dict)
 
 critic_nn = CriticNetwork()
 
-print("loaded critic checkpoint")
-critic_state_dict = torch.load("critic_checkpoint.pt")
-critic_nn.load_state_dict(critic_state_dict)
+# print("loaded critic checkpoint")
+# critic_state_dict = torch.load("critic_checkpoint.pt")
+# critic_nn.load_state_dict(critic_state_dict)
 
 policy_player = NNPlayer(0, policy_nn, critic_nn)
 
