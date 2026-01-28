@@ -332,8 +332,7 @@ class RTSGame():
                         tx -= 1
                     elif action[x][y] == ACT_RIGHT:
                         tx += 1
-                    else:
-                        continue
+                    
                     
                     if not (0 <= tx < MAP_W and 0 <= ty < MAP_H):
                         continue
@@ -359,10 +358,8 @@ class RTSGame():
                     # Villager collect, return gold, make tc and barrack
                     elif tile_info.actor_type == VILLAGER_TYPE:
                         if action[x][y] == TURN_BARRACK and tile_info.carry_gold >= BARRACK_COST:
-                            print("SHOULD TURN BARRACK")
                             self.map[x][y] = bitpackTile(newBarrackTile(side))
                         elif action[x][y] == TURN_TC and tile_info.carry_gold >= TC_COST:
-                            print("SHOULD TURN TC")
                             self.map[x][y] = bitpackTile(newTCTile(side))
                         elif target_tile_info.actor_type == GOLD_TYPE:
                             if tile_info.carry_gold <= 10:
