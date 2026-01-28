@@ -257,11 +257,24 @@ class RTSGame():
         self.map[0, 4] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
         self.map[9, 4] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
 
+        self.update_unpacked_map()
+        self.update_onehot_encoding()
+
         if not pygame.font.get_init():
             pygame.font.init()
         self.unit_font = pygame.font.SysFont("monospace", 15, bold=True)
         self.stats_font = pygame.font.SysFont("Arial", 8, bold=False)
 
+    def update_unpacked_map(self):
+        self.unpacked_map = np.empty((MAP_W, MAP_H), dtype = object)
+        for x in range(MAP_W):
+            for y in range(MAP_H):
+                self.unpacked_map[x][y] = bitunpackTile(self.map[x, y])
+                
+    def update_onehot_encoding(self):
+        self.onehot_encoded_tiles = np.array([self.unpacked_map[x][y].onehotEncode() for x in range(MAP_W) for y in range(MAP_H)]).reshape(MAP_W, MAP_H, -1)
+    
+    
     def drawGrid(self):
         for x in range(MAP_W):
             for y in range(MAP_H):
@@ -275,8 +288,7 @@ class RTSGame():
                 rect = pygame.Rect(rect_x, rect_y, BLOCKSIZE, BLOCKSIZE)
                 pygame.draw.rect(self.screen, (50, 50, 50), rect, 1)
 
-                packed_val = self.map[x, y]
-                tile_info = bitunpackTile(int(packed_val))
+                tile_info = self.unpacked_map[x][y]
 
                 # default to '?' if type not found in dictionary
                 char_to_draw = ASCII_CHARS.get(tile_info.actor_type, '?') 
@@ -301,7 +313,7 @@ class RTSGame():
 
     # Return the features of every tile
     def get_state(self):
-        return np.array([bitunpackTile(self.map[x, y]).onehotEncode() for x in range(MAP_W) for y in range(MAP_H)]).reshape(MAP_W, MAP_H, -1)
+        return self.onehot_encoded_tiles
 
     def get_state_tensor(self):
         state_tensor = torch.from_numpy(self.get_state()).float().unsqueeze(0)
@@ -321,7 +333,7 @@ class RTSGame():
                 # Say a unit moves right, this is to cover the case for the unit to move again.
                 if processed[x][y]: continue 
 
-                tile_info = bitunpackTile(self.map[x][y])
+                tile_info = self.unpacked_map[x][y]
                 if tile_info.player_n == side:
                     tx, ty = x, y
                     
@@ -338,7 +350,7 @@ class RTSGame():
                     if not (0 <= tx < MAP_W and 0 <= ty < MAP_H):
                         continue
 
-                    target_tile_info = bitunpackTile(self.map[tx][ty])
+                    target_tile_info = self.unpacked_map[tx][ty]
                     # Now actually make a move.
                     # TC makes villager
                     if tile_info.actor_type == TC_TYPE:
@@ -387,7 +399,8 @@ class RTSGame():
                             if target_tile_info.hp <= 0:
                                 target_tile_info = tile(NO_PLAYER, EMPTY_TYPE, 0, 0)
                             self.map[tx,ty] = bitpackTile(target_tile_info)
-
+        self.update_unpacked_map()
+        self.update_onehot_encoding()
                     
         reward = self.get_score(side) - self.get_score((side + 1)%2)
         win = -1
@@ -397,14 +410,19 @@ class RTSGame():
 
     def get_score(self, side):
         score = -12
-        
+        villager_count = 0
+        tc_count = 0
         for x in range(MAP_W):
             for y in range(MAP_H):
-                tile_info = bitunpackTile(self.map[x][y])
+                tile_info = self.unpacked_map[x][y]
                 if tile_info.player_n == side:
                     if tile_info.actor_type == TC_TYPE:
                         score += tile_info.hp
                         score += tile_info.carry_gold * 1.5
+                        tc_count += 1
+                    elif tile_info.actor_type == VILLAGER_TYPE:
+                        score += tile_info.hp
+                        score += tile_info.carry_gold
                     else:
                         score += tile_info.hp
                         score += tile_info.carry_gold
@@ -538,7 +556,7 @@ def pit(p1: Player, p2: Player, num_games):
                     if 0 <= pygame.mouse.get_pos()[0] <= WINDOW_W and 0 <= pygame.mouse.get_pos()[1] <= WINDOW_H:
                         grid_x = pygame.mouse.get_pos()[0] // BLOCKSIZE
                         grid_y = pygame.mouse.get_pos()[1] // BLOCKSIZE
-                        tile_info = bitunpackTile(game.map[grid_x, grid_y])
+                        tile_info = game.unpacked_map[grid_x][grid_y]
                         
                         print(f"mouse click at grid {(grid_x, grid_y)}")
                         print(f"tile info: hp:{tile_info.hp}, gold:{tile_info.carry_gold}")
@@ -584,7 +602,17 @@ def copy_player(policy_nn, critic_nn, policy_player):
     return policy_nn_copy, critic_nn_copy, policy_player_copy
 
 policy_nn = PolicyNetwork()
+
+print("loaded policy checkpoint")
+policy_state_dict = torch.load("policy_checkpoint.pt")
+policy_nn.load_state_dict(policy_state_dict)
+
 critic_nn = CriticNetwork()
+
+print("loaded critic checkpoint")
+critic_state_dict = torch.load("critic_checkpoint.pt")
+critic_nn.load_state_dict(critic_state_dict)
+
 policy_player = NNPlayer(0, policy_nn, critic_nn)
 
 
