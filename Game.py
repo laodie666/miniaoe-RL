@@ -241,17 +241,7 @@ class RTSGame():
     # NOTES: one hot encode every tile
     # Archer, spear, horseman rock paper scissor style.
     # Resource gathering.
-    
-    # TODO
-    # Set up game env
-    #   Unit interaction
-    #   Set up available moves (Will need optimization)
-    #   Playable
-    
-    # TODO
-    # Training
-    #   Learn and set up basic policy gradient
-    #   Set up PPO
+
 
     def setScreen(self, screen):
         self.screen = screen
@@ -302,25 +292,8 @@ class RTSGame():
 
     def display (self):
         self.screen.fill(BLACK)
-        while True:
-            self.drawGrid()
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    sys.exit()
-            
-            if pygame.mouse.get_pressed()[0]:
-
-                if 0 <= pygame.mouse.get_pos()[0] <= WINDOW_W and 0 <= pygame.mouse.get_pos()[1] <= WINDOW_H:
-                    grid_x = pygame.mouse.get_pos()[0] // BLOCKSIZE
-                    grid_y = pygame.mouse.get_pos()[1] // BLOCKSIZE
-                    tile_info = bitunpackTile(self.map[grid_x, grid_y])
-                    
-                    print(f"mouse click at grid {(grid_x, grid_y)}")
-                    print(f"tile info: hp:{tile_info.hp}, gold:{tile_info.carry_gold}")
-
-
-            pygame.display.update()
+        self.drawGrid()
+        pygame.display.update()
         
     def move_unit(self, cur_pos, target_pos):
         self.map[target_pos] = self.map[cur_pos]
@@ -397,8 +370,10 @@ class RTSGame():
                             self.move_unit((x, y), (tx, ty))
                             processed[tx][ty] = 1
                         elif target_tile_info.player_n == side and target_tile_info.actor_type == TC_TYPE or target_tile_info.actor_type == BARRACK_TYPE:
-                            target_tile_info.carry_gold += tile_info.carry_gold
-                            tile_info.carry_gold = 0
+                            # Let TC and Barrack only carry 6 gold
+                            transfered_gold = min(6 - target_tile_info.carry_gold, tile_info.carry_gold)
+                            target_tile_info.carry_gold += transfered_gold
+                            tile_info.carry_gold -= transfered_gold
                             self.map[x, y] = bitpackTile(tile_info)
                             self.map[tx, ty] = bitpackTile(target_tile_info)
                         
@@ -422,6 +397,7 @@ class RTSGame():
 
     def get_score(self, side):
         score = -12
+        
         for x in range(MAP_W):
             for y in range(MAP_H):
                 tile_info = bitunpackTile(self.map[x][y])
@@ -429,8 +405,8 @@ class RTSGame():
                     if tile_info.actor_type == TC_TYPE:
                         score += tile_info.hp
                         score += tile_info.carry_gold
-                    elif tile_info.actor_type == VILLAGER_TYPE:
-                        score += 1
+                    else:
+                        score += tile_info.hp
         return score
                         
 def train(trainee: NNPlayer, opponent: Player, episodes, gamma):
@@ -441,6 +417,7 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma):
     critic_optimizer = optim.Adam(trainee.critic.parameters())
     
     pygame.init()
+    clock = pygame.time.Clock()
     
     side = 0
     # Episodes
@@ -456,8 +433,39 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma):
         policy_optimizer.zero_grad()
         critic_optimizer.zero_grad()
         
+        slow = False
+        skip = False
         while not done and step <= 50:
-            if side == 0:
+            if  episode > 1000 and (episode % 200 == 0):
+                screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
+                game.setScreen(screen)
+                game.display()
+                if skip:
+                    clock.tick(0)
+                elif not slow:
+                    clock.tick(15)
+                else:
+                    clock.tick(2)
+                
+                if pygame.mouse.get_pressed()[0]:
+                    if 0 <= pygame.mouse.get_pos()[0] <= WINDOW_W and 0 <= pygame.mouse.get_pos()[1] <= WINDOW_H:
+                        grid_x = pygame.mouse.get_pos()[0] // BLOCKSIZE
+                        grid_y = pygame.mouse.get_pos()[1] // BLOCKSIZE
+                        tile_info = bitunpackTile(game.map[grid_x, grid_y])
+                        
+                        print(f"mouse click at grid {(grid_x, grid_y)}")
+                        print(f"tile info: hp:{tile_info.hp}, gold:{tile_info.carry_gold}")
+                events = pygame.event.get()
+                for event in events:
+                    if event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_SPACE and not slow:
+                            slow = True
+                        elif event.key == pygame.K_SPACE and slow:
+                            slow = False
+                        elif event.key == pygame.K_s:
+                            skip = True
+
+            if side == 0: 
                 state_tensor = game.get_state_tensor()
                 state_values.append(trainee.critic(state_tensor))
                 action = trainee.getAction(game)
@@ -482,9 +490,8 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma):
             R = r + gamma * R
             returns.insert(0,R)
         returns = torch.tensor(returns, dtype=torch.float32)
-
         # Make sure dont divide by 0
-        returns = (returns - returns.mean()) / (returns.std() + 1e-5)
+        returns = (returns - returns.mean()) / (returns.std() + 1e-7)
 
         # Loss functions
         log_probs = torch.stack(log_probs) 
@@ -502,7 +509,8 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma):
         # Optimze
         policy_optimizer.step()
         critic_optimizer.step()
-        print(f"Ep {episode}: Reward {sum(rewards)}")
+
+        print(f"Ep {episode}: Returns {sum(returns)}: Reward {reward}")
     
     return None
 
@@ -510,4 +518,4 @@ policy_nn = PolicyNetwork()
 critic_nn = CriticNetwork()
 policy_player = NNPlayer(0, policy_nn, critic_nn)
 random_player = RandomPlayer(1)
-train(policy_player, random_player, 2000, 0.95)
+train(policy_player, random_player, 5000, 0.95)
