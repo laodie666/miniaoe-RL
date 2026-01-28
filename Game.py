@@ -639,5 +639,5 @@ for epoch in range(epochs):
         print("Performed better than before, updating agent.")
         policy_nn_copy, critic_nn_copy, policy_player_copy = copy_player(policy_nn, critic_nn, policy_player)
     else:
-        print("Performed worse, Revert.")
-        policy_nn, critic_nn, policy_player = copy_player(policy_nn_copy, critic_nn_copy, policy_player_copy)
+        print("Performed worse, Keep training.")
+        # policy_nn, critic_nn, policy_player = copy_player(policy_nn_copy, critic_nn_copy, policy_player_copy)
