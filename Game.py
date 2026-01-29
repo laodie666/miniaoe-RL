@@ -35,8 +35,8 @@ BARRACK_HP = 3
 
 VILLAGER_COST = 1
 TROOP_COST = 1
-TC_COST = 3
-BARRACK_COST = 2
+TC_COST = 4
+BARRACK_COST = 3
     
 MAX_PLAYERS = 4
 MAX_ACTORS = 8
@@ -251,10 +251,10 @@ def bitunpackTile(value: int):
     return tile(player_n, actor_type, hp, carry_gold)
 
 def newBarrackTile(side):
-    return tile(side, BARRACK_TYPE, BARRACK_HP, 2)
+    return tile(side, BARRACK_TYPE, BARRACK_HP, 0)
 
 def newTCTile(side):
-    return tile(side, TC_TYPE, TC_HP, 1)
+    return tile(side, TC_TYPE, TC_HP, 0)
 
 class RTSGame():
 
@@ -266,6 +266,8 @@ class RTSGame():
 
     def setScreen(self, screen):
         self.screen = screen
+
+    # TODO: RANDOMIZE RESOURCE AND START POSITION
 
     def __init__(self):
         empty_val = bitpackTile(tile(NO_PLAYER, EMPTY_TYPE, 0, 0))
