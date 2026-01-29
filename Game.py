@@ -84,6 +84,11 @@ NUM_ACTIONS = 7
 # +1 are hp and carry gold
 CHANNEL_NUM = MAX_ACTORS + MAX_PLAYERS + 1 + 1
 
+LEFT_MAIN_TC_POS = (3, 4)
+RIGHT_MAIN_TC_POS = (6, 4)
+
+
+
 class Player():
     
     def __init__(self, side):
@@ -102,18 +107,14 @@ class PolicyNetwork(nn.Module):
         
         # Note this conversion from CNN to Linear is so hand wavy, there is probably some way to make this easier that I should look into.
         # there is a + 1 in the end to make the agent aware of what side it is on.
-        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16 + 1, 120)
+        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, MAP_W * MAP_H * NUM_ACTIONS)
 
-    def forward(self, x, side):
+    def forward(self, x):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = torch.flatten(x, 1) 
-        
-        # Extend the side tensor and pass it into the first linear network.
-        side_tensor = torch.full((x.shape[0], 1), side, device=device, dtype = x.dtype)
-        x = torch.cat((x, side_tensor), dim=1)
         
         x = F.relu(self.fc1(x))
         x = F.dropout(x, 0.2)
@@ -132,17 +133,14 @@ class CriticNetwork(nn.Module):
         self.conv1 = nn.Conv2d(CHANNEL_NUM, 8, 3)
         self.conv2 = nn.Conv2d(8, 16, 3)
         
-        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16 + 1, 120)
+        self.fc1 = nn.Linear((MAP_W - 4) * (MAP_H - 4) * 16, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 1)
 
-    def forward(self, x, side):
+    def forward(self, x):
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = torch.flatten(x, 1) 
-        
-        side_tensor = torch.full((x.shape[0], 1), side, device=device, dtype = x.dtype)
-        x = torch.cat((x, side_tensor), dim=1)
         
         x = F.relu(self.fc1(x))
         x = F.dropout(x, 0.2)
@@ -153,6 +151,17 @@ class CriticNetwork(nn.Module):
         x = self.fc3(x)
         
         return x
+    
+# Since I'm only training the network as side = 0, when its playing as side 1 the unit side should be swapped. 
+def get_cannonical_state(state_tensor, side):
+    if side == 0:
+        return state_tensor
+    canonical_state = state_tensor.clone()
+    # (Batch, Channels, W, H), swap 0 and 1 player number of one hot encoding.
+    canonical_state[:,0,:,:] = state_tensor[:,1,:,:]
+    canonical_state[:,1,:,:] = state_tensor[:,0,:,:]
+    return canonical_state
+
 
 class NNPlayer(Player):
         
@@ -162,8 +171,9 @@ class NNPlayer(Player):
         self.critic = critic
         
     def getAction(self, game: "RTSGame"):
-        
-        logits = self.policy(game.get_state_tensor(), self.side)
+        cannonical_state = get_cannonical_state(game.get_state_tensor(), self.side)
+
+        logits = self.policy(cannonical_state)
         self.m = torch.distributions.Categorical(logits=logits)
 
         action = self.m.sample()
@@ -263,8 +273,8 @@ class RTSGame():
         self.map = np.full((MAP_W, MAP_H), empty_val)
         self.left_side = random.randint(0,1)
         self.right_side = (1+self.left_side)%2
-        self.map[3, 4] = bitpackTile(tile(self.left_side, TC_TYPE, TC_HP, 3))
-        self.map[6, 4] = bitpackTile(tile(self.right_side, TC_TYPE, TC_HP, 3))
+        self.map[LEFT_MAIN_TC_POS] = bitpackTile(tile(self.left_side, TC_TYPE, TC_HP, 3))
+        self.map[RIGHT_MAIN_TC_POS] = bitpackTile(tile(self.right_side, TC_TYPE, TC_HP, 3))
 
         self.map[0, 4] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
         self.map[9, 4] = bitpackTile(tile(NO_PLAYER, GOLD_TYPE, GOLD_HP, 0))
@@ -416,17 +426,33 @@ class RTSGame():
                             self.map[tx,ty] = bitpackTile(target_tile_info)
 
         self.update_onehot_encoding()
-                    
-        reward = self.get_score(side) - self.get_score((side + 1)%2)
         win = -1
+        if self.get_score((side + 1)%2) is None:
+            print(f"GG player {(side + 1)%2} DIED")
+            win = side
+            reward = self.get_score(side) + 100
+        elif self.get_score(side) is None:
+            print(f"GG player {side} DIED")
+            win = (side + 1)%2
+            reward = -100
+        else:
+            reward = self.get_score(side) - self.get_score((side + 1)%2)
+        
         
         return action, self.get_state(), win, reward
-        # Game end check, return action, state, win, reward
 
     def get_score(self, side):
         score = -12
         villager_count = 0
         tc_count = 0
+
+        left_main_tc_tile = bitunpackTile(self.map[LEFT_MAIN_TC_POS])
+        right_main_tc_tile = bitunpackTile(self.map[RIGHT_MAIN_TC_POS])
+
+        if left_main_tc_tile.player_n != side and right_main_tc_tile.player_n != side:
+            # TODO: This is SUPER SCUFFED. Since any number can be reached with the current score, to distinguish game ending return None
+            return None
+
         for x in range(MAP_W):
             for y in range(MAP_H):
                 tile_info = bitunpackTile(self.map[x][y])
@@ -474,11 +500,13 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma, entropy_coef):
             if side == 0: 
                 state_tensor = game.get_state_tensor()
                 
-                player_map = state_tensor[0, side, :, :] # Get the channel for 'side'
+                player_map = state_tensor[0, side, :, :]
+
+                # Create a mask for where the player has units, then only consider those tiles when calculating loss to avoid being distracted by empty tiles.
                 mask = player_map > 0
                 masks.append(mask)
 
-                state_values.append(trainee.critic(state_tensor, side))
+                state_values.append(trainee.critic(state_tensor))
                 action = trainee.getAction(game)
                 
                 log_prob = trainee.getProbabilities(action)
@@ -492,7 +520,9 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma, entropy_coef):
             else:
                 action, state_tensor, win, reward = game.step(opponent.getAction(game), side)
 
-            
+            if win != -1:
+                done = True
+
             side = (side + 1) % 2
             step += 1 
         
@@ -532,8 +562,7 @@ def train(trainee: NNPlayer, opponent: Player, episodes, gamma, entropy_coef):
         critic_optimizer.step()
 
         print(f"Ep {episode}: Policy_loss {policy_loss}: Critic_loss {critic_loss}")
-        if win != -1:
-            done = True
+        
     
     return None
 
@@ -605,14 +634,14 @@ def pit(p1: Player, p2: Player, num_games):
                 win_rate[1] += 1
     return win_rate
 
-def copy_player(policy_nn, critic_nn, policy_player):
+def copy_player(policy_nn, critic_nn, policy_player, side):
     policy_nn_copy = PolicyNetwork().to(device)
     policy_nn_copy.load_state_dict(policy_nn.state_dict())
 
     critic_nn_copy = CriticNetwork().to(device)
     critic_nn_copy.load_state_dict(critic_nn.state_dict())
 
-    policy_player_copy = NNPlayer(0, policy_nn_copy, critic_nn_copy)
+    policy_player_copy = NNPlayer(side, policy_nn_copy, critic_nn_copy)
 
     return policy_nn_copy, critic_nn_copy, policy_player_copy
 
@@ -620,20 +649,19 @@ print(torch.cuda.is_available())
 
 policy_nn = PolicyNetwork().to(device)
 
-print("loaded policy checkpoint")
-policy_state_dict = torch.load("policy_checkpoint.pt")
-policy_nn.load_state_dict(policy_state_dict)
+# print("loaded policy checkpoint")
+# policy_state_dict = torch.load("policy_checkpoint.pt")
+# policy_nn.load_state_dict(policy_state_dict)
 
 critic_nn = CriticNetwork().to(device)
 
-print("loaded critic checkpoint")
-critic_state_dict = torch.load("critic_checkpoint.pt")
-critic_nn.load_state_dict(critic_state_dict)
+# print("loaded critic checkpoint")
+# critic_state_dict = torch.load("critic_checkpoint.pt")
+# critic_nn.load_state_dict(critic_state_dict)
 
 policy_player = NNPlayer(0, policy_nn, critic_nn)
 
-
-policy_nn_copy, critic_nn_copy, policy_player_copy = copy_player(policy_nn, critic_nn, policy_player)
+policy_nn_copy, critic_nn_copy, policy_player_copy = copy_player(policy_nn, critic_nn, policy_player, 1)
 
 win_rate = pit(policy_player, policy_player_copy, 50)
 print(win_rate)
@@ -648,7 +676,7 @@ for epoch in range(epochs):
     print(win_rate)
     if win_rate[0] - 5 >= win_rate[1]:
         print("Performed better than before, updating agent.")
-        policy_nn_copy, critic_nn_copy, policy_player_copy = copy_player(policy_nn, critic_nn, policy_player)
+        policy_nn_copy, critic_nn_copy, policy_player_copy = copy_player(policy_nn, critic_nn, policy_player, 1)
     else:
         print("Performed worse, Keep training.")
         # policy_nn, critic_nn, policy_player = copy_player(policy_nn_copy, critic_nn_copy, policy_player_copy)
