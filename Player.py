@@ -27,9 +27,10 @@ def get_cannonical_state(state_tensor, side):
 
 class NNPlayer(Player):
         
-    def __init__(self, side, policy:NN.PolicyNetwork):
+    def __init__(self, side, policy:NN.PolicyNetwork, critic:NN.CriticNetwork):
         self.side = side
         self.policy = policy
+        self.critic = critic
         
     def getAction(self, game: Game.RTSGame):
         cannonical_state = get_cannonical_state(game.get_state_tensor(), self.side)

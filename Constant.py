@@ -3,7 +3,7 @@ WHITE = (200, 200, 200)
 
 MAP_H = 10
 MAP_W = 10
-BLOCKSIZE = 20 # for gridsize 
+BLOCKSIZE = 100 # for gridsize 
 WINDOW_H = MAP_H * BLOCKSIZE
 WINDOW_W = MAP_W * BLOCKSIZE
 
