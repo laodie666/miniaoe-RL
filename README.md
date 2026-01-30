@@ -1,8 +1,13 @@
 #MiniRTS Reinforcement Learning project
 
 Without Training:
-https://github.com/user-attachments/assets/941f93a9-7677-426f-8bac-d87d2b2b26ac
+
+https://github.com/user-attachments/assets/45602c61-f4fb-42e7-9a99-6dd74c42020b
+
 
 With Training:
-https://github.com/user-attachments/assets/2a44f931-94a0-4f79-a5e6-23e03b32e626
+
+https://github.com/user-attachments/assets/a332d362-9cef-47f3-b480-28025a0f309e
+
+
 
